@@ -16,6 +16,7 @@
 // under the License.
 
 import { Data, makeData } from '../data.js';
+import { Utf8 } from '../type.js';
 import * as type from '../type.js';
 import { Field } from '../schema.js';
 import { Vector } from '../vector.js';
@@ -75,6 +76,73 @@ export class VectorLoader extends Visitor {
     public visitLargeUtf8<T extends type.LargeUtf8>(type: T, { length, nullCount } = this.nextFieldNode()) {
         return makeData({ type, length, nullCount, nullBitmap: this.readNullBitmap(type, nullCount), valueOffsets: this.readOffsets(type), data: this.readData(type) });
     }
+
+    public visitUtf8View<T extends type.Utf8View>(type: T, { length, nullCount } = this.nextFieldNode()) {
+        // Utf8View represents an Arrow C Data Interface-style view structure.
+        // Each 16-byte view layout (little-endian):
+        // [0..3]  int32 length (L)
+        // [4..7]  first 4 bytes of data if L <= 12 (inlined prefix, may include 0 padding)
+        // [8..11] int32 bufferIndex (if L > 12, else undefined contents)
+        // [12..15] int32 offset within external data buffer (if L > 12)
+        // For L <= 12, remaining bytes after the first 4 are stored immediately after length
+        // in the next 12 bytes (bytes [4..15]) but only first L bytes after the length form the string.
+        const nullBitmap = this.readNullBitmap(type, nullCount);
+        const viewsBuffer = this.readData(type);
+        if (length === 0) {
+            return makeData({ type, length, nullCount, nullBitmap, valueOffsets: new Uint8Array(new Int32Array([0]).buffer), data: new Uint8Array(0) });
+        }
+        const views = new DataView(viewsBuffer.buffer, viewsBuffer.byteOffset, viewsBuffer.byteLength);
+        let maxBufferIndex = -1;
+        for (let i = 0; i < length; i++) {
+            const base = i * 16;
+            if (base + 4 > views.byteLength) break; // truncated safeguard
+            const strLength = views.getInt32(base, true);
+            if (strLength > 12) {
+                if (base + 16 > views.byteLength) break; // truncated
+                const bufferIndex = views.getInt32(base + 8, true);
+                if (bufferIndex > maxBufferIndex) { maxBufferIndex = bufferIndex; }
+            }
+        }
+        const dataBuffers: Uint8Array[] = [];
+        for (let i = 0; i <= maxBufferIndex; i++) {
+            const db = this.readData(type); dataBuffers.push(db);
+        }
+        const offsets = new Int32Array(length + 1) as Int32Array;
+        const chunks: Uint8Array[] = new Array(length);
+        let running = 0;
+        for (let i = 0; i < length; i++) {
+            const base = i * 16;
+            let slice = new Uint8Array(0);
+            if (base + 4 <= views.byteLength) {
+                const strLength = views.getInt32(base, true);
+                if (strLength <= 12) {
+                    if (base + 4 + strLength <= views.byteLength) {
+                        slice = new Uint8Array(viewsBuffer.buffer, viewsBuffer.byteOffset + base + 4, strLength);
+                    }
+                } else if (base + 16 <= views.byteLength) {
+                    const bufferIndex = views.getInt32(base + 8, true);
+                    const offset = views.getInt32(base + 12, true);
+                    const buf = dataBuffers[bufferIndex];
+                    if (buf && offset >= 0 && offset + strLength <= buf.byteLength) {
+                        slice = new Uint8Array(buf.buffer, buf.byteOffset + offset, strLength);
+                    }
+                }
+            }
+            chunks[i] = slice;
+            offsets[i] = running;
+            running += slice.byteLength;
+        }
+        offsets[length] = running;
+        const out = new Uint8Array(running);
+        let cursor = 0;
+        for (let i = 0; i < length; i++) {
+            const c = chunks[i];
+            out.set(c, cursor);
+            cursor += c.byteLength;
+        }
+        // Build equivalent Utf8View logical data while preserving original type.
+        return makeData({ type, length, nullCount, nullBitmap, valueOffsets: new Uint8Array(offsets.buffer), data: out });
+    }
     public visitBinary<T extends type.Binary>(type: T, { length, nullCount } = this.nextFieldNode()) {
         return makeData({ type, length, nullCount, nullBitmap: this.readNullBitmap(type, nullCount), valueOffsets: this.readOffsets(type), data: this.readData(type) });
     }
@@ -131,7 +199,6 @@ export class VectorLoader extends Visitor {
     public visitMap<T extends type.Map_>(type: T, { length, nullCount } = this.nextFieldNode()) {
         return makeData({ type, length, nullCount, nullBitmap: this.readNullBitmap(type, nullCount), valueOffsets: this.readOffsets(type), 'child': this.visit(type.children[0]) });
     }
-
     protected nextFieldNode() { return this.nodes[++this.nodesIndex]; }
     protected nextBufferRange() { return this.buffers[++this.buffersIndex]; }
     protected readNullBitmap<T extends DataType>(type: T, nullCount: number, buffer = this.nextBufferRange()) {

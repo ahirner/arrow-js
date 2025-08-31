@@ -31,6 +31,7 @@ import {
     Duration, DurationSecond, DurationMillisecond, DurationMicrosecond, DurationNanosecond,
     Union, DenseUnion, SparseUnion,
     IntervalMonthDayNano,
+    Utf8View,
 } from '../type.js';
 
 /** @ignore */
@@ -195,6 +196,10 @@ function compareUnion<T extends Union>(type: T, other?: DataType | null): other 
     );
 }
 
+function compareUtf8<T extends Utf8 | Utf8View>(type: T, other?: DataType | null): other is T {
+    return (type === other) || (other instanceof Utf8) || (other instanceof Utf8View);
+}
+
 function compareDictionary<T extends Dictionary>(type: T, other?: DataType | null): other is T {
     return (type === other) || (
         compareConstructor(type, other) &&
@@ -252,7 +257,8 @@ TypeComparator.prototype.visitFloat = compareFloat;
 TypeComparator.prototype.visitFloat16 = compareFloat;
 TypeComparator.prototype.visitFloat32 = compareFloat;
 TypeComparator.prototype.visitFloat64 = compareFloat;
-TypeComparator.prototype.visitUtf8 = compareAny;
+TypeComparator.prototype.visitUtf8 = compareUtf8;
+TypeComparator.prototype.visitUtf8View = compareUtf8;
 TypeComparator.prototype.visitLargeUtf8 = compareAny;
 TypeComparator.prototype.visitBinary = compareAny;
 TypeComparator.prototype.visitLargeBinary = compareAny;
