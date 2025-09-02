@@ -370,7 +370,7 @@ abstract class RecordBatchReaderImpl<T extends TypeMap = any> implements RecordB
             new Vector(data)).memoize() as Vector;
     }
     protected _loadVectors(header: metadata.RecordBatch, body: any, types: (Field | DataType)[]) {
-        return new VectorLoader(body, header.nodes, header.buffers, this.dictionaries, this.schema.metadataVersion).visitMany(types);
+        return new VectorLoader(body, header.nodes, header.buffers, this.dictionaries, this.schema.metadataVersion, header.variadicBufferCounts).visitMany(types);
     }
 }
 

@@ -149,12 +149,15 @@ export class RecordBatch {
     protected _length: number;
     protected _nodes: FieldNode[];
     protected _buffers: BufferRegion[];
+    protected _variadicBufferCounts: number[];
     public get nodes() { return this._nodes; }
     public get length() { return this._length; }
     public get buffers() { return this._buffers; }
-    constructor(length: bigint | number, nodes: FieldNode[], buffers: BufferRegion[]) {
+    public get variadicBufferCounts() { return this._variadicBufferCounts; }
+    constructor(length: bigint | number, nodes: FieldNode[], buffers: BufferRegion[], variadicBufferCounts: number[] = []) {
         this._nodes = nodes;
         this._buffers = buffers;
+        this._variadicBufferCounts = variadicBufferCounts;
         this._length = bigIntToNumber(length);
     }
 }
@@ -299,7 +302,13 @@ function decodeRecordBatch(batch: _RecordBatch, version = MetadataVersion.V5) {
     if (batch.compression() !== null) {
         throw new Error('Record batch compression not implemented');
     }
-    return new RecordBatch(batch.length(), decodeFieldNodes(batch), decodeBuffers(batch, version));
+    const len = batch.variadicBufferCountsLength();
+    const variadicCounts = new Array<number>(len);
+    for (let i = 0; i < len; i++) {
+        // FlatBuffers codegen returns bigint for 64-bit ints; convert to number (counts are small)
+        variadicCounts[i] = Number(batch.variadicBufferCounts(i)!);
+    }
+    return new RecordBatch(batch.length(), decodeFieldNodes(batch), decodeBuffers(batch, version), variadicCounts);
 }
 
 /** @ignore */
@@ -434,6 +443,9 @@ function decodeFieldType(f: _Field, children?: Field[]): DataType<any> {
         case Type['Utf8']: return new Utf8();
         case Type['LargeUtf8']: return new LargeUtf8();
         case Type['Utf8View']: return new Utf8View();
+        case Type['BinaryView']: throw new Error('BinaryView decoding not yet supported in this vendored build');
+        case Type['ListView']: throw new Error('ListView decoding not yet supported in this vendored build');
+        case Type['LargeListView']: throw new Error('LargeListView decoding not yet supported in this vendored build');
         case Type['Bool']: return new Bool();
         case Type['List']: return new List((children || [])[0]);
         case Type['Struct_']: return new Struct(children || []);

@@ -45,13 +45,16 @@ export class VectorLoader extends Visitor {
     private buffersIndex = -1;
     private dictionaries: Map<number, Vector<any>>;
     private readonly metadataVersion: MetadataVersion;
-    constructor(bytes: Uint8Array, nodes: FieldNode[], buffers: BufferRegion[], dictionaries: Map<number, Vector<any>>, metadataVersion = MetadataVersion.V5) {
+    private variadicBufferCounts: number[];
+    private variadicIndex = 0;
+    constructor(bytes: Uint8Array, nodes: FieldNode[], buffers: BufferRegion[], dictionaries: Map<number, Vector<any>>, metadataVersion = MetadataVersion.V5, variadicBufferCounts: number[] = []) {
         super();
         this.bytes = bytes;
         this.nodes = nodes;
         this.buffers = buffers;
         this.dictionaries = dictionaries;
         this.metadataVersion = metadataVersion;
+        this.variadicBufferCounts = variadicBufferCounts;
     }
 
     public visit<T extends DataType>(node: Field<T> | T): Data<T> {
@@ -79,8 +82,23 @@ export class VectorLoader extends Visitor {
 
     public visitUtf8View<T extends type.Utf8View>(type: T, { length, nullCount } = this.nextFieldNode()) {
         const nullBitmap = this.readNullBitmap(type, nullCount);
-        const viewsBuffer = this.readData(type);
-        const dataBuffers = [this.readData(type)];
+        let viewsBuffer: Uint8Array;
+        let dataBuffers: Uint8Array[] = [];
+        if (this.variadicBufferCounts.length > 0 && this.variadicIndex < this.variadicBufferCounts.length) {
+            const externalCount = this.variadicBufferCounts[this.variadicIndex++] || 0; // number of external data buffers after views
+            viewsBuffer = this.readData(type);
+            if (externalCount > 0) {
+                for (let i = 0; i < externalCount; i++) {
+                    dataBuffers.push(this.readData(type));
+                }
+            } else {
+                dataBuffers = [viewsBuffer];
+            }
+        } else {
+            // No variadic buffer counts provided; treat field as single views buffer with inlined data.
+            viewsBuffer = this.readData(type);
+            dataBuffers = [viewsBuffer];
+        }
         return decodeUtf8View(type, length, nullCount, nullBitmap, viewsBuffer, dataBuffers);
     }
     public visitBinary<T extends type.Binary>(type: T, { length, nullCount } = this.nextFieldNode()) {
