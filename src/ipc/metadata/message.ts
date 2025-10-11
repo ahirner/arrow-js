@@ -40,6 +40,9 @@ import { FixedSizeBinary as _FixedSizeBinary } from '../../fb/fixed-size-binary.
 import { FixedSizeList as _FixedSizeList } from '../../fb/fixed-size-list.js';
 import { Map as _Map } from '../../fb/map.js';
 import { Message as _Message } from '../../fb/message.js';
+import { CompressionType as _CompressionType } from '../../fb/compression-type.js';
+import { BodyCompression as _BodyCompression } from '../../fb/body-compression.js';
+import { BodyCompressionMethod as _BodyCompressionMethod } from '../../fb/body-compression-method.js';
 
 import { Schema, Field } from '../../schema.js';
 import { toUint8Array } from '../../util/buffer.js';
@@ -54,7 +57,7 @@ import ByteBuffer = flatbuffers.ByteBuffer;
 
 import {
     DataType, Dictionary, TimeBitWidth,
-    Utf8, LargeUtf8, Binary, LargeBinary, Decimal, FixedSizeBinary,
+    Utf8, LargeUtf8, Binary, LargeBinary, Decimal, FixedSizeBinary, Utf8View,
     List, FixedSizeList, Map_, Struct, Union,
     Bool, Null, Int, Float, Date_, Time, Interval, Timestamp, IntBitWidth, Int32, TKeys, Duration,
 } from '../../type.js';
@@ -122,9 +125,11 @@ export class Message<T extends MessageHeader = any> {
     protected _headerType: T;
     protected _bodyLength: number;
     protected _version: MetadataVersion;
+    protected _compression: BodyCompression | null;
     public get type() { return this.headerType; }
     public get version() { return this._version; }
     public get headerType() { return this._headerType; }
+    public get compression() { return this._compression; }
     public get bodyLength() { return this._bodyLength; }
     declare protected _createHeader: MessageHeaderDecoder;
     public header() { return this._createHeader<T>(); }
@@ -136,6 +141,7 @@ export class Message<T extends MessageHeader = any> {
         this._version = version;
         this._headerType = headerType;
         this.body = new Uint8Array(0);
+        this._compression = header?.compression;
         header && (this._createHeader = () => header);
         this._bodyLength = bigIntToNumber(bodyLength);
     }
@@ -149,13 +155,25 @@ export class RecordBatch {
     protected _length: number;
     protected _nodes: FieldNode[];
     protected _buffers: BufferRegion[];
+    protected _variadicBufferCounts: number[];
+    protected _compression: BodyCompression | null;
     public get nodes() { return this._nodes; }
     public get length() { return this._length; }
     public get buffers() { return this._buffers; }
-    constructor(length: bigint | number, nodes: FieldNode[], buffers: BufferRegion[]) {
+    public get variadicBufferCounts() { return this._variadicBufferCounts; }
+    public get compression() { return this._compression; }
+    constructor(
+        length: bigint | number,
+        nodes: FieldNode[],
+        buffers: BufferRegion[],
+        compression: BodyCompression | null = null,
+        variadicBufferCounts: number[] = []
+    ) {
         this._nodes = nodes;
         this._buffers = buffers;
+        this._variadicBufferCounts = variadicBufferCounts;
         this._length = bigIntToNumber(length);
+        this._compression = compression;
     }
 }
 
@@ -208,6 +226,19 @@ export class FieldNode {
     }
 }
 
+/**
+ * @ignore
+ * @private
+ **/
+export class BodyCompression {
+    public type: _CompressionType;
+    public method: _BodyCompressionMethod;
+    constructor(type: _CompressionType, method: _BodyCompressionMethod = _BodyCompressionMethod.BUFFER) {
+        this.type = type;
+        this.method = method;
+    }
+}
+
 /** @ignore */
 function messageHeaderFromJSON(message: any, type: MessageHeader) {
     return (() => {
@@ -254,6 +285,9 @@ FieldNode['decode'] = decodeFieldNode;
 BufferRegion['encode'] = encodeBufferRegion;
 BufferRegion['decode'] = decodeBufferRegion;
 
+BodyCompression['encode'] = encodeBodyCompression;
+BodyCompression['decode'] = decodeBodyCompression;
+
 declare module '../../schema' {
     namespace Field {
         export { encodeField as encode };
@@ -286,6 +320,10 @@ declare module './message' {
         export { encodeBufferRegion as encode };
         export { decodeBufferRegion as decode };
     }
+    namespace BodyCompression {
+        export { encodeBodyCompression as encode };
+        export { decodeBodyCompression as decode };
+    }
 }
 
 /** @ignore */
@@ -296,10 +334,19 @@ function decodeSchema(_schema: _Schema, dictionaries: Map<number, DataType> = ne
 
 /** @ignore */
 function decodeRecordBatch(batch: _RecordBatch, version = MetadataVersion.V5) {
-    if (batch.compression() !== null) {
-        throw new Error('Record batch compression not implemented');
+    const len = batch.variadicBufferCountsLength();
+    const variadicCounts = new Array<number>(len);
+    for (let i = 0; i < len; i++) {
+        // FlatBuffers codegen returns bigint for 64-bit ints; convert to number (counts are small)
+        variadicCounts[i] = Number(batch.variadicBufferCounts(i)!);
     }
-    return new RecordBatch(batch.length(), decodeFieldNodes(batch), decodeBuffers(batch, version));
+    return new RecordBatch(
+        batch.length(),
+        decodeFieldNodes(batch),
+        decodeBuffers(batch, version),
+        decodeBodyCompression(batch.compression()),
+        variadicCounts
+    );
 }
 
 /** @ignore */
@@ -433,6 +480,10 @@ function decodeFieldType(f: _Field, children?: Field[]): DataType<any> {
         case Type['LargeBinary']: return new LargeBinary();
         case Type['Utf8']: return new Utf8();
         case Type['LargeUtf8']: return new LargeUtf8();
+        case Type['Utf8View']: return new Utf8View();
+        case Type['BinaryView']: throw new Error('BinaryView decoding not yet supported in this vendored build');
+        case Type['ListView']: throw new Error('ListView decoding not yet supported in this vendored build');
+        case Type['LargeListView']: throw new Error('LargeListView decoding not yet supported in this vendored build');
         case Type['Bool']: return new Bool();
         case Type['List']: return new List((children || [])[0]);
         case Type['Struct_']: return new Struct(children || []);
@@ -489,6 +540,11 @@ function decodeFieldType(f: _Field, children?: Field[]): DataType<any> {
         }
     }
     throw new Error(`Unrecognized type: "${Type[typeId]}" (${typeId})`);
+}
+
+/** @ignore */
+function decodeBodyCompression(b: _BodyCompression | null) {
+    return b ? new BodyCompression(b.codec(), b.method()) : null;
 }
 
 /** @ignore */
@@ -583,11 +639,27 @@ function encodeRecordBatch(b: Builder, recordBatch: RecordBatch) {
 
     const buffersVectorOffset = b.endVector();
 
+    let bodyCompressionOffset = null;
+    if (recordBatch.compression !== null) {
+        bodyCompressionOffset = encodeBodyCompression(b, recordBatch.compression);
+    }
+
     _RecordBatch.startRecordBatch(b);
     _RecordBatch.addLength(b, BigInt(recordBatch.length));
     _RecordBatch.addNodes(b, nodesVectorOffset);
     _RecordBatch.addBuffers(b, buffersVectorOffset);
+    if (recordBatch.compression !== null && bodyCompressionOffset) {
+        _RecordBatch.addCompression(b, bodyCompressionOffset);
+    }
     return _RecordBatch.endRecordBatch(b);
+}
+
+/** @ignore */
+function encodeBodyCompression(b: Builder, node: BodyCompression) {
+    _BodyCompression.startBodyCompression(b);
+    _BodyCompression.addCodec(b, node.type);
+    _BodyCompression.addMethod(b, node.method);
+    return _BodyCompression.endBodyCompression(b);
 }
 
 /** @ignore */

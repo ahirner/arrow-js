@@ -37,6 +37,7 @@ export abstract class Visitor {
     public visitFloat(_node: any, ..._args: any[]): any { return null; }
     public visitUtf8(_node: any, ..._args: any[]): any { return null; }
     public visitLargeUtf8(_node: any, ..._args: any[]): any { return null; }
+    public visitUtf8View(_node: any, ..._args: any[]): any { return null; }
     public visitBinary(_node: any, ..._args: any[]): any { return null; }
     public visitLargeBinary(_node: any, ..._args: any[]): any { return null; }
     public visitFixedSizeBinary(_node: any, ..._args: any[]): any { return null; }
@@ -92,6 +93,7 @@ function getVisitFnByTypeId(visitor: Visitor, dtype: Type, throwIfNotFound = tru
         case Type.Float64: fn = visitor.visitFloat64 || visitor.visitFloat; break;
         case Type.Utf8: fn = visitor.visitUtf8; break;
         case Type.LargeUtf8: fn = visitor.visitLargeUtf8; break;
+        case Type.Utf8View: fn = visitor.visitUtf8View; break;
         case Type.Binary: fn = visitor.visitBinary; break;
         case Type.LargeBinary: fn = visitor.visitLargeBinary; break;
         case Type.FixedSizeBinary: fn = visitor.visitFixedSizeBinary; break;
@@ -110,6 +112,11 @@ function getVisitFnByTypeId(visitor: Visitor, dtype: Type, throwIfNotFound = tru
         case Type.TimeNanosecond: fn = visitor.visitTimeNanosecond || visitor.visitTime; break;
         case Type.Decimal: fn = visitor.visitDecimal; break;
         case Type.List: fn = visitor.visitList; break;
+        case Type.LargeList: fn = visitor.visitList; break; // treat LargeList like List for now
+        case Type.RunEndEncoded: fn = visitor.visitList; break; // minimal placeholder handling
+        case Type.BinaryView: fn = visitor.visitBinary; break; // unsupported view types map to base
+        case Type.ListView: fn = visitor.visitList; break; // placeholder
+        case Type.LargeListView: fn = visitor.visitList; break; // placeholder
         case Type.Struct: fn = visitor.visitStruct; break;
         case Type.Union: fn = visitor.visitUnion; break;
         case Type.DenseUnion: fn = visitor.visitDenseUnion || visitor.visitUnion; break;
@@ -159,6 +166,7 @@ function inferDType<T extends DataType>(type: T): Type {
         case Type.LargeBinary: return Type.LargeBinary;
         case Type.Utf8: return Type.Utf8;
         case Type.LargeUtf8: return Type.LargeUtf8;
+        case Type.Utf8View: return Type.Utf8View;
         case Type.Bool: return Type.Bool;
         case Type.Decimal: return Type.Decimal;
         case Type.Time:

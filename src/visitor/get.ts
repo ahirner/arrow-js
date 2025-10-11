@@ -331,6 +331,9 @@ GetVisitor.prototype.visitFloat16 = wrapGet(getFloat16);
 GetVisitor.prototype.visitFloat32 = wrapGet(getNumeric);
 GetVisitor.prototype.visitFloat64 = wrapGet(getNumeric);
 GetVisitor.prototype.visitUtf8 = wrapGet(getUtf8);
+// Utf8View shares underlying variable-width layout (valueOffsets + values)
+// so we can reuse getUtf8 decoder.
+GetVisitor.prototype.visitUtf8View = wrapGet(getUtf8);
 GetVisitor.prototype.visitLargeUtf8 = wrapGet(getUtf8);
 GetVisitor.prototype.visitBinary = wrapGet(getBinary);
 GetVisitor.prototype.visitLargeBinary = wrapGet(getBinary);

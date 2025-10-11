@@ -70,6 +70,12 @@ export enum Type {
     Duration = 18, /** Measure of elapsed time in either seconds, milliseconds, microseconds or nanoseconds */
     LargeBinary = 19, /** Large variable-length bytes (no guarantee of UTF8-ness) */
     LargeUtf8 = 20, /** Large variable-length string as List<Char> */
+    LargeList = 21, /** Large list of some logical data type */
+    RunEndEncoded = 22, /** Run-end encoded data */
+    BinaryView = 23, /** View-based binary (variable buffers) */
+    Utf8View = 24, /** View-based utf8 string (variable buffers) */
+    ListView = 25, /** View-based list (not yet supported) */
+    LargeListView = 26, /** View-based large list (not yet supported) */
 
     Dictionary = -1, /** Dictionary aka Category type */
     Int8 = -2,

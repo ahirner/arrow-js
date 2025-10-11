@@ -16,6 +16,7 @@
 // under the License.
 
 import { Data, makeData } from '../data.js';
+import { decodeUtf8View } from './view-utf8view.js';
 import * as type from '../type.js';
 import { Field } from '../schema.js';
 import { Vector } from '../vector.js';
@@ -41,16 +42,19 @@ export class VectorLoader extends Visitor {
     private nodes: FieldNode[];
     private nodesIndex = -1;
     private buffers: BufferRegion[];
-    private buffersIndex = -1;
+    protected buffersIndex = -1;
     private dictionaries: Map<number, Vector<any>>;
     private readonly metadataVersion: MetadataVersion;
-    constructor(bytes: Uint8Array, nodes: FieldNode[], buffers: BufferRegion[], dictionaries: Map<number, Vector<any>>, metadataVersion = MetadataVersion.V5) {
+    private variadicBufferCounts: number[];
+    private variadicIndex = 0;
+    constructor(bytes: Uint8Array, nodes: FieldNode[], buffers: BufferRegion[], dictionaries: Map<number, Vector<any>>, metadataVersion = MetadataVersion.V5, variadicBufferCounts: number[] = []) {
         super();
         this.bytes = bytes;
         this.nodes = nodes;
         this.buffers = buffers;
         this.dictionaries = dictionaries;
         this.metadataVersion = metadataVersion;
+        this.variadicBufferCounts = variadicBufferCounts;
     }
 
     public visit<T extends DataType>(node: Field<T> | T): Data<T> {
@@ -74,6 +78,28 @@ export class VectorLoader extends Visitor {
     }
     public visitLargeUtf8<T extends type.LargeUtf8>(type: T, { length, nullCount } = this.nextFieldNode()) {
         return makeData({ type, length, nullCount, nullBitmap: this.readNullBitmap(type, nullCount), valueOffsets: this.readOffsets(type), data: this.readData(type) });
+    }
+
+    public visitUtf8View<T extends type.Utf8View>(type: T, { length, nullCount } = this.nextFieldNode()) {
+        const nullBitmap = this.readNullBitmap(type, nullCount);
+        let viewsBuffer: Uint8Array;
+        let dataBuffers: Uint8Array[] = [];
+        if (this.variadicBufferCounts.length > 0 && this.variadicIndex < this.variadicBufferCounts.length) {
+            const externalCount = this.variadicBufferCounts[this.variadicIndex++] || 0; // number of external data buffers after views
+            viewsBuffer = this.readData(type);
+            if (externalCount > 0) {
+                for (let i = 0; i < externalCount; i++) {
+                    dataBuffers.push(this.readData(type));
+                }
+            } else {
+                dataBuffers = [viewsBuffer];
+            }
+        } else {
+            // No variadic buffer counts provided; treat field as single views buffer with inlined data.
+            viewsBuffer = this.readData(type);
+            dataBuffers = [viewsBuffer];
+        }
+        return decodeUtf8View(type, length, nullCount, nullBitmap, viewsBuffer, dataBuffers);
     }
     public visitBinary<T extends type.Binary>(type: T, { length, nullCount } = this.nextFieldNode()) {
         return makeData({ type, length, nullCount, nullBitmap: this.readNullBitmap(type, nullCount), valueOffsets: this.readOffsets(type), data: this.readData(type) });
@@ -131,7 +157,6 @@ export class VectorLoader extends Visitor {
     public visitMap<T extends type.Map_>(type: T, { length, nullCount } = this.nextFieldNode()) {
         return makeData({ type, length, nullCount, nullBitmap: this.readNullBitmap(type, nullCount), valueOffsets: this.readOffsets(type), 'child': this.visit(type.children[0]) });
     }
-
     protected nextFieldNode() { return this.nodes[++this.nodesIndex]; }
     protected nextBufferRange() { return this.buffers[++this.buffersIndex]; }
     protected readNullBitmap<T extends DataType>(type: T, nullCount: number, buffer = this.nextBufferRange()) {
@@ -204,4 +229,15 @@ function binaryDataFromJSON(values: string[]) {
         data[i >> 1] = Number.parseInt(joined.slice(i, i + 2), 16);
     }
     return data;
+}
+
+export class CompressedVectorLoader extends VectorLoader {
+    private bodyChunks: Uint8Array[];
+    constructor(bodyChunks: Uint8Array[], nodes: FieldNode[], buffers: BufferRegion[], dictionaries: Map<number, Vector<any>>, metadataVersion: MetadataVersion, variadicBufferCounts: number[] = []) {
+        super(new Uint8Array(0), nodes, buffers, dictionaries, metadataVersion, variadicBufferCounts);
+        this.bodyChunks = bodyChunks;
+    }
+    protected readData<T extends DataType>(_type: T, _buffer = this.nextBufferRange()) {
+        return this.bodyChunks[this.buffersIndex];
+    }
 }

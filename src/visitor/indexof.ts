@@ -177,6 +177,7 @@ IndexOfVisitor.prototype.visitFloat32 = indexOfValue;
 IndexOfVisitor.prototype.visitFloat64 = indexOfValue;
 IndexOfVisitor.prototype.visitUtf8 = indexOfValue;
 IndexOfVisitor.prototype.visitLargeUtf8 = indexOfValue;
+IndexOfVisitor.prototype.visitUtf8View = indexOfValue;
 IndexOfVisitor.prototype.visitBinary = indexOfValue;
 IndexOfVisitor.prototype.visitLargeBinary = indexOfValue;
 IndexOfVisitor.prototype.visitFixedSizeBinary = indexOfValue;
