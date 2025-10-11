@@ -233,8 +233,8 @@ function binaryDataFromJSON(values: string[]) {
 
 export class CompressedVectorLoader extends VectorLoader {
     private bodyChunks: Uint8Array[];
-    constructor(bodyChunks: Uint8Array[], nodes: FieldNode[], buffers: BufferRegion[], dictionaries: Map<number, Vector<any>>, metadataVersion: MetadataVersion) {
-        super(new Uint8Array(0), nodes, buffers, dictionaries, metadataVersion);
+    constructor(bodyChunks: Uint8Array[], nodes: FieldNode[], buffers: BufferRegion[], dictionaries: Map<number, Vector<any>>, metadataVersion: MetadataVersion, variadicBufferCounts: number[] = []) {
+        super(new Uint8Array(0), nodes, buffers, dictionaries, metadataVersion, variadicBufferCounts);
         this.bodyChunks = bodyChunks;
     }
     protected readData<T extends DataType>(_type: T, _buffer = this.nextBufferRange()) {
