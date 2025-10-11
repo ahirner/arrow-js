@@ -15,10 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-const decoder = new TextDecoder('utf-8');
-/** @ignore */
-export const decodeUtf8 = decoder.decode.bind(decoder);
-
-const encoder = new TextEncoder();
-/** @ignore */
-export const encodeUtf8 = (value?: string) => encoder.encode(value);
+declare module 'zstd-codec' {
+    export const ZstdCodec: {
+        run(callback: (zstd: any) => void): void;
+    };
+}
